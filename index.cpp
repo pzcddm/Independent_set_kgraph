@@ -37,8 +37,9 @@ int main (int argc, char *argv[]) {
     unsigned synthetic;
     float noise;
 
-    bool lshkit = true;
-
+    bool lshkit = false;
+    params.if_improve = true;
+    
     po::options_description desc_visible("General options");
     desc_visible.add_options()
     ("help,h", "produce help message.")
@@ -133,6 +134,7 @@ int main (int argc, char *argv[]) {
         }
     }
     else {
+        printf("D:%u,skip:%d,gap:%d\n",D,skip,gap);
         data.load(data_path, D, skip, gap);
     }
     if (noise != 0) {

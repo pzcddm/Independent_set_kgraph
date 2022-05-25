@@ -11,7 +11,7 @@
 #include <stdexcept>
 
 namespace kgraph {
-    static unsigned const default_iterations =  30;
+    static unsigned const default_iterations =  100;
     static unsigned const default_L = 100;
     static unsigned const default_K = 25;
     static unsigned const default_P = 100;
@@ -104,6 +104,7 @@ namespace kgraph {
             unsigned prune;
             int reverse;
 
+            bool if_improve; //if if_improve ==1, enable our improvement in code
             /// Construct with default values.
             IndexParams (): iterations(default_iterations), L(default_L), K(default_K), S(default_S), R(default_R), controls(default_controls), seed(default_seed), delta(default_delta), recall(default_recall), prune(default_prune), reverse(default_reverse) {
             }

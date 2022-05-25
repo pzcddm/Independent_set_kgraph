@@ -255,7 +255,7 @@ namespace kgraph {
     }
 
     void GenerateControl (IndexOracle const &oracle, unsigned C, unsigned K, vector<Control> *pcontrols) {
-        vector<Control> controls(C);
+        vector<Control> controls(C); //这个Controls是用来测试的 先找到几个结点的真正最近的领居，然后测试的时候看看估算的邻居里面有多少是真的最近的邻居
         {
             vector<unsigned> index(oracle.size());
             int i = 0;
@@ -725,12 +725,17 @@ namespace kgraph {
             float radiusM;
             Neighbors pool;
             unsigned L;     // # valid items in the pool,  L + 1 <= pool.size()
-            unsigned M;     // we only join items in pool[0..M)
+            unsigned M;     // we only join items in pool[0..M) 总算理解了 M就是在KNN里面因为确定了pK为S，而pool也就是KNN里面即有old也有new的，这个M就是第S个new在pool的位置或者是（当new太少了不够S个）那就是上一次迭代的M+S与L中的最小值
             bool found;     // helped found new NN in this round
             vector<unsigned> nn_old;
             vector<unsigned> nn_new;
             vector<unsigned> rnn_old;
             vector<unsigned> rnn_new;
+            
+            bool if_independent; // My improvement: check if this node belongs to a 2 rank independent set
+            bool if_attach2set; //My improvement: check if this node attached to the noded belonging to the 2 rank independent set
+            unsigned rn; //My improvement: generate rendom number for each node in the graph
+            unsigned neighbors_maxRn; //My improvement: find the max rn of all neighbors
 
             // only non-readonly method which is supposed to be called in parallel
             unsigned parallel_try_insert (unsigned id, float dist) {
@@ -769,10 +774,12 @@ namespace kgraph {
         IndexInfo *pinfo;
         vector<Nhood> nhoods;
         size_t n_comps;
+        unsigned allocate_rn_seed; //My improvement
 
         void init () {
             unsigned N = oracle.size();
             unsigned seed = params.seed;
+            allocate_rn_seed = params.seed+1; //My improvement
             mt19937 rng(seed);
             for (auto &nhood: nhoods) {
                 nhood.nn_new.resize(params.S * 2);
@@ -808,9 +815,16 @@ namespace kgraph {
             }
         }
         void join () {
+            unsigned total_found=0;
             size_t cc = 0;
 #pragma omp parallel for default(shared) schedule(dynamic, 100) reduction(+:cc)
             for (unsigned n = 0; n < oracle.size(); ++n) {
+                
+                //My improvement: skip the nodes that are dependent 
+                if(params.if_improve == true && nhoods[n].if_independent == false){
+                    continue;
+                }
+
                 size_t uu = 0;
                 nhoods[n].found = false;
                 nhoods[n].join([&](unsigned i, unsigned j) {
@@ -823,12 +837,20 @@ namespace kgraph {
                         if (r < params.K) ++uu;
                 });
                 nhoods[n].found = uu > 0;
+                total_found=total_found+ (uu > 0);
             }
             n_comps += cc;
+            printf("cc: %lu\n",cc);
+            printf("total_found: %u\n",total_found);
         }
         void update () {
             unsigned N = oracle.size();
             for (auto &nhood: nhoods) {
+                
+                //My improvemet:
+                if(params.if_improve == true && nhood.if_attach2set == false)
+                    continue;
+
                 nhood.nn_new.clear();
                 nhood.nn_old.clear();
                 nhood.rnn_new.clear();
@@ -854,6 +876,11 @@ namespace kgraph {
             }
 #pragma omp parallel for
             for (unsigned n = 0; n < N; ++n) {
+
+                //My improvemet:
+                if(params.if_improve == true && nhoods[n].if_attach2set == false)
+                    continue;
+                
                 auto &nhood = nhoods[n];
                 auto &nn_new = nhood.nn_new;
                 auto &nn_old = nhood.nn_old;
@@ -893,6 +920,118 @@ namespace kgraph {
                 }
                 nn_old.insert(nn_old.end(), rnn_old.begin(), rnn_old.end());
             }
+
+            //My improvement
+            if(params.if_improve == true){
+                allocate_rn();
+                find_max_neighborRn();
+                find_2rankIndependentSet();
+            }
+
+        }
+
+        //My improvement: allocate distinct random number (<N) to each node of nhoods
+        void allocate_rn(){
+            unsigned N = oracle.size();
+            mt19937 rng(allocate_rn_seed);
+            for (unsigned i = 0; i < N; ++i) {
+                nhoods[i].rn = rng();
+            }
+            allocate_rn_seed++;
+
+            //Initialize if_independent of all nodes as 1
+            for (unsigned i = 0; i < N; ++i) {
+                nhoods[i].if_independent = true;
+                nhoods[i].if_attach2set=false;
+            }
+
+        }
+
+        void find_max_neighborRn(){
+            unsigned N = oracle.size();
+            unsigned tmp_max_rn;
+            for (unsigned i = 0; i < N; ++i) {
+                tmp_max_rn=nhoods[i].rn;
+                auto &nn_new = nhoods[i].nn_new;
+                auto &nn_old = nhoods[i].nn_old;
+                for(unsigned j : nn_new ){
+                    tmp_max_rn = std::max(tmp_max_rn, nhoods[j].rn);
+                }
+                for(unsigned j : nn_old ){
+                    tmp_max_rn = std::max(tmp_max_rn, nhoods[j].rn);
+                }
+                nhoods[i].neighbors_maxRn = tmp_max_rn;
+                
+                //if the neighbors'max random number is bigger than its, it cannot be in the independent set.
+                if(nhoods[i].neighbors_maxRn>nhoods[i].rn){
+                    nhoods[i].if_independent = false;
+                }
+            }
+        }
+        
+        //make neighbours of id dependent(nhoods[id].if_independent <- 0)
+        void set_neighbors_dependent(unsigned id){
+            auto &nn_new = nhoods[id].nn_new;
+            auto &nn_old = nhoods[id].nn_old;
+            for(unsigned j : nn_new ){
+                nhoods[j].if_independent = false;
+            }
+            for(unsigned j : nn_old ){
+                nhoods[j].if_independent = false;
+            }
+        }
+
+        void set_neighbors_attached(unsigned id){
+            auto &nn_new = nhoods[id].nn_new;
+            auto &nn_old = nhoods[id].nn_old;
+            for(unsigned j : nn_new ){
+                nhoods[j].if_attach2set = true;
+            }
+            for(unsigned j : nn_old ){
+                nhoods[j].if_attach2set = true;
+            }
+        }
+
+        void find_2rankIndependentSet(){
+
+            unsigned count_independent = 0;
+            unsigned N = oracle.size();
+            for (unsigned i = 0; i < N; ++i) {
+                if(nhoods[i].if_independent == 0){
+                    continue;
+                }
+
+                auto &nn_new = nhoods[i].nn_new;
+                auto &nn_old = nhoods[i].nn_old;
+                for(unsigned j : nn_new ){
+                    if(nhoods[i].rn>=nhoods[j].neighbors_maxRn){
+                        set_neighbors_dependent(j);
+                    }else{
+                        nhoods[i].if_independent = 0;
+                        break;
+                    }
+                }
+
+                if(nhoods[i].if_independent == 0){
+                    continue;
+                }
+                for(unsigned j : nn_old ){
+                    if(nhoods[i].rn>=nhoods[j].neighbors_maxRn){
+                        set_neighbors_dependent(j);
+                    }else{
+                        nhoods[i].if_independent = 0;
+                        break;
+                    }
+                }
+
+                if(nhoods[i].if_independent == 0){
+                    continue;
+                }
+
+                set_neighbors_attached(i); //set neighbours attached to this independent node
+                count_independent++; 
+            }
+            printf("Conut_independent:%u\n",count_independent);
         }
 
 public:
@@ -923,6 +1062,13 @@ public:
             if (verbosity > 0) cerr << "Initializing..." << endl;
             // initialize nhoods
             init();
+
+            //My improvement
+            if(params.if_improve==1){
+                allocate_rn();
+                find_max_neighborRn();
+                find_2rankIndependentSet();
+            }
 
             // iterate until converge
             float total = N * float(N - 1) / 2;
