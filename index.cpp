@@ -38,7 +38,7 @@ int main (int argc, char *argv[]) {
     float noise;
 
     bool lshkit = false;
-    params.if_improve = true;
+    params.if_improve = false;
     
     po::options_description desc_visible("General options");
     desc_visible.add_options()

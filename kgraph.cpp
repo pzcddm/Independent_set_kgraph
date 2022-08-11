@@ -263,7 +263,7 @@ namespace kgraph {
                 v = i++;
             }
             random_shuffle(index.begin(), index.end());
-#pragma omp parallel for
+// #pragma omp parallel for
             for (unsigned i = 0; i < C; ++i) {
                 controls[i].id = index[i];
                 LinearSearch(oracle, index[i], K, &controls[i].neighbors);
@@ -702,13 +702,13 @@ namespace kgraph {
             {
                 cerr << "Reranking edges..." << endl;
                 progress_display progress(graph.size(), cerr);
-#pragma omp parallel for
+// #pragma omp parallel for
                 for (unsigned i = 0; i < graph.size(); ++i) {
                     auto &v = graph[i];
                     std::sort(v.begin(), v.end());
                     v.resize(std::unique(v.begin(), v.end()) - v.begin());
                     M[i] = v.size();
-#pragma omp critical
+// #pragma omp critical
                     ++progress;
                 }
             }
@@ -786,7 +786,7 @@ namespace kgraph {
                 nhood.pool.resize(params.L+1);
                 nhood.radius = numeric_limits<float>::max();
             }
-#pragma omp parallel
+// #pragma omp parallel
             {
 #ifdef _OPENMP
                 mt19937 rng(seed ^ omp_get_thread_num());
@@ -794,7 +794,7 @@ namespace kgraph {
                 mt19937 rng(seed);
 #endif
                 vector<unsigned> random(params.S + 1);
-#pragma omp for
+// #pragma omp for
                 for (unsigned n = 0; n < N; ++n) {
                     auto &nhood = nhoods[n];
                     Neighbors &pool = nhood.pool;
@@ -817,7 +817,7 @@ namespace kgraph {
         void join () {
             unsigned total_found=0;
             size_t cc = 0;
-#pragma omp parallel for default(shared) schedule(dynamic, 100) reduction(+:cc)
+// #pragma omp parallel for default(shared) schedule(dynamic, 100) reduction(+:cc)
             for (unsigned n = 0; n < oracle.size(); ++n) {
                 
                 //My improvement: skip the nodes that are dependent 
@@ -858,7 +858,7 @@ namespace kgraph {
                 nhood.radius = nhood.pool.back().dist;
             }
             //!!! compute radius2
-#pragma omp parallel for
+// #pragma omp parallel for
             for (unsigned n = 0; n < N; ++n) {
                 auto &nhood = nhoods[n];
                 if (nhood.found) {
@@ -874,7 +874,7 @@ namespace kgraph {
                 BOOST_VERIFY(nhood.M > 0);
                 nhood.radiusM = nhood.pool[nhood.M-1].dist;
             }
-#pragma omp parallel for
+// #pragma omp parallel for
             for (unsigned n = 0; n < N; ++n) {
 
                 //My improvemet:
@@ -995,8 +995,13 @@ namespace kgraph {
         void find_2rankIndependentSet(){
 
             unsigned count_independent = 0;
+            unsigned count_attached = 0;
             unsigned N = oracle.size();
             for (unsigned i = 0; i < N; ++i) {
+                if(nhoods[i].if_attach2set == 1){
+                    count_attached++;
+                }
+
                 if(nhoods[i].if_independent == 0){
                     continue;
                 }
@@ -1031,7 +1036,7 @@ namespace kgraph {
                 set_neighbors_attached(i); //set neighbours attached to this independent node
                 count_independent++; 
             }
-            printf("Conut_independent:%u\n",count_independent);
+            printf("Conut_independent:%u Count_attached:%u \n",count_independent,count_attached);
         }
 
 public:
